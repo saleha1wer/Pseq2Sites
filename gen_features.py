@@ -8,6 +8,16 @@ import numpy as np
 import os
 from pathlib import Path
 from transformers import T5EncoderModel, T5Tokenizer
+from tqdm import tqdm
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def main():
     
@@ -27,7 +37,7 @@ def main():
                                 Enter the path to save; \
                                 e.g., -o ./datasets/COACH420_features.pkl"  
                 )  
-    parser.add_argument("--labels", "-l", required = True, type = bool,
+    parser.add_argument("--labels", "-l", required = True, type = str2bool,
                         help = "labels is True: Binding site information is added when generating data for training; \
                                 labels is False: Binding site information is not added when generating data for test; \
                                 e.g., -t True" 
@@ -64,32 +74,42 @@ def main():
     prots_model = prots_model.eval()
     
     batch_seq_list, prots_feat_list = list(), list()
-    
+    oom = 0
+    pbar = tqdm(total = len(seqs), desc = "Extracting features")
     for seq in seqs:
+        pbar.update(1)
+        pbar.set_postfix(oom = oom)
         # split to chain seqs
         seq_list = seq.split(",")
         tmp_seq_embeddings = list()
-        
+        try:
         # get chain embeddings
-        for se in seq_list:
-            batch_seq_list.append(se)
-            seqs_example = [re.sub(r"[UZOB]", "X", seq) for seq in batch_seq_list]
-            seqs_example = [" ".join(list(seq)) for seq in seqs_example]
+            for se in seq_list:
+                batch_seq_list.append(se)
+                seqs_example = [re.sub(r"[UZOB]", "X", seq) for seq in batch_seq_list]
+                seqs_example = [" ".join(list(seq)) for seq in seqs_example]
 
-            ids = tokenizer.batch_encode_plus(seqs_example, add_special_tokens = True, pad_to_max_length = True)
-            input_ids = torch.tensor(ids['input_ids']).to(device)
-            attention_mask = torch.tensor(ids['attention_mask']).to(device)  
-            
-            with torch.no_grad():  
-                embedding = prots_model(input_ids = input_ids, attention_mask = attention_mask)[0]
-                embedding = embedding.cpu().numpy()
-                seq_len = (attention_mask[0] == 1).sum()
+                ids = tokenizer.batch_encode_plus(seqs_example, add_special_tokens = True, pad_to_max_length = True)
+                input_ids = torch.tensor(ids['input_ids']).to(device)
+                attention_mask = torch.tensor(ids['attention_mask']).to(device)  
+                with torch.no_grad():  
+                    embedding = prots_model(input_ids = input_ids, attention_mask = attention_mask)[0]
+                    embedding = embedding.cpu().numpy()
+                    seq_len = (attention_mask[0] == 1).sum()
 
-                # prot_t5 do not use start token
-                seq_emd = embedding[0][:seq_len-1]
+                    # prot_t5 do not use start token
+                    seq_emd = embedding[0][:seq_len-1]
 
-            batch_seq_list = list()
-            tmp_seq_embeddings.extend(list(seq_emd))
+                batch_seq_list = list()
+                tmp_seq_embeddings.extend(list(seq_emd))
+        except RuntimeError as e:
+            if "out of memory" in str(e):
+                print("OOM error")
+                oom += 1
+                torch.cuda.empty_cache()
+                continue
+            else:
+                raise e
             
         prots_feat_list.append(np.array(tmp_seq_embeddings))
     

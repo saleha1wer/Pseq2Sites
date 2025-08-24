@@ -70,7 +70,7 @@ class Pseq2SitesTrainIter:
         with torch.no_grad():
             self.model.eval()
             
-            for batch in loader:
+            for batch in tqdm(loader, total=len(loader)):
                 # prepare input
                 aa_feats, prot_feats, prot_masks, binding_sites, position_ids, chain_idx = prepare_prots_input(self.config, batch)
                 
@@ -95,7 +95,7 @@ class Pseq2SitesTrainIter:
         with torch.no_grad():
             self.model.eval()
             
-            for batch in loader:
+            for batch in tqdm(loader, total=len(loader)):
                 # prepare input
                 aa_feats, prot_feats, prot_masks, position_ids, chain_idx = prepare_prots_input(self.config, batch, training = False)
                 
